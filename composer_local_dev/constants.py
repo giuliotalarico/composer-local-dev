@@ -64,7 +64,6 @@ $ composer-dev start {env_name}
 
 You can modify generated files to change your environment settings. 
 Common settings are defined in {config_path}.
-PyPi extra packages are listed in {requirements_path}.
 Airflow overrides and environment variables are stored in {env_variables_path}.
 
 You can put your plugins and data to plugins and data directories 
@@ -104,6 +103,9 @@ IMAGE_TAG_PERMISSION_DENIED_WARN = (
 )
 CREATING_DAGS_PATH_WARN = (
     "Dags path '{dags_path}' does not exist. It will be created."
+)
+CREATING_LAYERS_PATH_WARN = (
+    "Layers path '{layers_path}' does not exist. It will be created."
 )
 DAGS_PATH_NOT_PROVIDED_WARN = (
     "No dags directory provided, using default dags directory."

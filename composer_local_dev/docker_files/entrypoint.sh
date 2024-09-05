@@ -22,6 +22,7 @@ init_airflow() {
   mkdir -p ${AIRFLOW__CORE__DAGS_FOLDER}
   mkdir -p ${AIRFLOW__CORE__PLUGINS_FOLDER}
   mkdir -p ${AIRFLOW__CORE__DATA_FOLDER}
+  mkdir -p "${AIRFLOW__CORE__DATA_FOLDER}/config"
 
   # That file exists in Composer < 1.19.2 and is responsible for linking name
   # `python` to python3 exec, in Composer >= 1.19.2 name `python` is already
@@ -30,10 +31,18 @@ init_airflow() {
       /var/local/setup_python_command.sh
   fi
 
-  pip3 install --upgrade -r composer_requirements.txt
-  pip3 check
+  # Install custom provider package
+  pip install --index-url https://europe-west1-python.pkg.dev/tlp-dataplatform-dev/internal-pip/simple/ apache-airflow-provider-reply==0.1.5
+
+  # Copy global configs into the config folder
+  cp "${AIRFLOW__CORE__DATA_FOLDER}/all_configs/dataflow_sensor_config.json" "${AIRFLOW__CORE__DATA_FOLDER}/config/dataflow_sensor_config.json"
+  cp "${AIRFLOW__CORE__DATA_FOLDER}/all_configs/historical_config.jsonc" "${AIRFLOW__CORE__DATA_FOLDER}/config/historical_config.jsonc"
+
+  # Copy environment configs into the config folder
+  cp -r "${AIRFLOW__CORE__DATA_FOLDER}/all_configs/_env/dev/"* "${AIRFLOW__CORE__DATA_FOLDER}/config/"
 
   airflow db init
+  airflow variables import "$AIRFLOW__CORE__DATA_FOLDER/config/airflow_variables.json"
 
   # Allow non-authenticated access to UI for Airflow 2.*
   if ! grep -Fxq "AUTH_ROLE_PUBLIC = 'Admin'" /home/airflow/airflow/webserver_config.py; then

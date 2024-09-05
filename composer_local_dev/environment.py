@@ -46,20 +46,23 @@ def timeout_occurred(start_time):
 def get_image_mounts(
     env_path: pathlib.Path,
     dags_path: str,
+    layers_path:str,
+    config_path:str,
     gcloud_config_path: str,
-    requirements: pathlib.Path,
 ) -> List[docker.types.Mount]:
     """
     Return list of docker volumes to be mounted inside container.
     Following paths are mounted:
-     - requirements for python packages to be installed
      - dags, plugins and data for paths which contains dags, plugins and data
+     - layers_path which contains SQL files
+     - config_path which contains both global configs (dataflow_sensor_config, historical_config) and environment configs (e.g. _env/dev/airflow_variables)
      - gcloud_config_path which contains user credentials to gcloud
      - environment airflow sqlite db file location
     """
     mount_paths = {
-        requirements: "composer_requirements.txt",
         dags_path: "gcs/dags/",
+        layers_path: "gcs/data/layers/",
+        config_path: "gcs/data/all_configs/",
         env_path / "plugins": "gcs/plugins/",
         env_path / "data": "gcs/data/",
         gcloud_config_path: ".config/gcloud",
@@ -98,7 +101,7 @@ def get_default_environment_variables(
         "AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT": f"google-cloud-platform://?"
         f"extra__google_cloud_platform__project={project_id}&"
         f"extra__google_cloud_platform__scope="
-        f"https://www.googleapis.com/auth/cloud-platform",
+        f"https://www.googleapis.com/auth/cloud-platform"
     }
 
 
@@ -355,6 +358,8 @@ class EnvironmentConfig:
         self.image_version = self.get_str_param("composer_image_version")
         self.location = self.get_str_param("composer_location")
         self.dags_path = self.get_str_param("dags_path")
+        self.layers_path = self.get_str_param("layers_path"),
+        self.config_path = self.get_str_param("config_path"),
         self.dag_dir_list_interval = self.parse_int_param(
             "dag_dir_list_interval", allowed_range=(0,)
         )
@@ -437,6 +442,8 @@ class Environment:
         image_version: str,
         location: str,
         dags_path: Optional[str],
+        layers_path: Optional[str],
+        config_path: Optional[str],
         dag_dir_list_interval: int = 10,
         port: Optional[int] = None,
         pypi_packages: Optional[Dict] = None,
@@ -447,14 +454,15 @@ class Environment:
         self.env_dir_path = env_dir_path
         self.airflow_db = self.env_dir_path / "airflow.db"
         self.entrypoint_file = DOCKER_FILES / "entrypoint.sh"
-        self.requirements_file = self.env_dir_path / "requirements.txt"
         self.project_id = project_id
         self.image_version = image_version
         self.image_tag = get_docker_image_tag_from_image_version(image_version)
         self.location = location
         self.dags_path = files.resolve_dags_path(dags_path, env_dir_path)
+        self.layers_path = files.resolve_layers_path(layers_path, env_dir_path)
+        self.config_path = files.resolve_config_path(config_path, env_dir_path)
         self.dag_dir_list_interval = dag_dir_list_interval
-        self.port: int = port if port is not None else 8080
+        self.port: int = port if port is not None else 9999
         self.pypi_packages = (
             pypi_packages if pypi_packages is not None else dict()
         )
@@ -504,6 +512,8 @@ class Environment:
             image_version=config.image_version,
             location=config.location,
             dags_path=config.dags_path,
+            layers_path=config.layers_path,
+            config_path=config.config_path,
             dag_dir_list_interval=config.dag_dir_list_interval,
             port=config.port,
             environment_vars=environment_vars,
@@ -518,6 +528,8 @@ class Environment:
         env_dir_path: pathlib.Path,
         web_server_port: Optional[int],
         dags_path: Optional[str],
+        layers_path: Optional[str],
+        config_path: Optional[str],
     ):
         """
         Create Environment using configuration retrieved from Composer
@@ -539,6 +551,8 @@ class Environment:
             image_version=software_config.image_version,
             location=location,
             dags_path=dags_path,
+            layers_path=layers_path,
+            config_path=config_path,
             dag_dir_list_interval=10,
             port=web_server_port,
             pypi_packages=pypi_packages,
@@ -562,6 +576,25 @@ class Environment:
             f"# {key}=" for key, _ in self.environment_vars.items()
         )
         env_vars_lines = "\n".join(env_vars)
+
+        # custom environment variables
+        custom_env_vars = {
+            "composer_code_version": "2.0.0",
+            "curated_pipeline_version": "2.0.2",
+            "ingestion_pipeline_version": "2.0.1",
+            "release_date": "2024-08-18",
+            "DAGS_FOLDER": "/home/airflow/gcs/dags",
+            "GCP_PROJECT": "tlp-dataplatform-dev",
+        }
+
+        custom_env_vars = sorted(
+            f"{key}={value}" for key, value in custom_env_vars.items()
+        )
+
+        custom_env_vars_lines = "\n".join(custom_env_vars)
+
+        env_vars_lines += "\n" + custom_env_vars_lines
+
         with open(self.env_dir_path / "variables.env", "w") as fp:
             fp.write(env_vars_lines)
 
@@ -578,6 +611,8 @@ class Environment:
             "composer_location": self.location,
             "composer_project_id": self.project_id,
             "dags_path": self.dags_path,
+            "layers_path": self.layers_path,
+            "config_path": self.config_path,
             "dag_dir_list_interval": int(self.dag_dir_list_interval),
             "port": int(self.port),
         }
@@ -593,8 +628,9 @@ class Environment:
         mounts = get_image_mounts(
             self.env_dir_path,
             self.dags_path,
+            self.layers_path,
+            self.config_path,
             utils.resolve_gcloud_config_path(),
-            self.requirements_file,
         )
         default_vars = get_default_environment_variables(
             self.dag_dir_list_interval, self.project_id
@@ -613,6 +649,7 @@ class Environment:
         def create_container():
             try:
                 return self.docker_client.containers.create(
+                    # TODO: modify image to have package apache-airflow-provider-reply preinstalled
                     self.image_tag,
                     name=self.container_name,
                     entrypoint=entrypoint,
@@ -670,17 +707,14 @@ class Environment:
         requirements.txt files.
         """
         assert_image_exists(self.image_version)
-        files.create_environment_directories(self.env_dir_path, self.dags_path)
         files.create_empty_file(self.airflow_db, skip_if_exist=False)
         self.write_environment_config_to_config_file()
-        self.pypi_packages_to_requirements()
         self.environment_vars_to_env_file()
         console.get_console().print(
             constants.CREATE_MESSAGE.format(
                 env_dir=self.env_dir_path,
                 env_name=self.name,
                 config_path=self.env_dir_path / "config.json",
-                requirements_path=self.env_dir_path / "requirements.txt",
                 env_variables_path=self.env_dir_path / "variables.env",
                 dags_path=self.dags_path,
             )
@@ -742,13 +776,12 @@ class Environment:
         Started environment is polled until Airflow scheduler starts.
         """
         assert_image_exists(self.image_version)
-        self.assert_requirements_exist()
         files.assert_dag_path_exists(self.dags_path)
         files.create_empty_file(self.airflow_db)
         files.fix_file_permissions(
-            self.entrypoint_file, self.requirements_file, self.airflow_db
+            self.entrypoint_file, self.airflow_db
         )
-        files.fix_line_endings(self.entrypoint_file, self.requirements_file)
+        files.fix_line_endings(self.entrypoint_file)
         container = self.get_or_create_container()
         if (
             assert_not_running

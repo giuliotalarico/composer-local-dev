@@ -47,7 +47,7 @@ click.rich_click.OPTION_GROUPS = {
         },
         {
             "name": "Environment options",
-            "options": ["--web-server-port", "--dags-path"],
+            "options": ["--web-server-port", "--dags-path", "--layers-path"],
         },
     ],
     "composer-dev start": [COMMON_OPTIONS],
@@ -225,6 +225,20 @@ option_location = click.option(
     metavar="PATH",
     type=click.Path(file_okay=False),
 )
+@click.option(
+    "--layers-path",
+    help="Path to layers folder where SQL files are stored. If it does not exist, it will be created.",
+    show_default="'layers' directory in the environment directory",
+    metavar="PATH",
+    type=click.Path(file_okay=False),
+)
+@click.option(
+    "--config-path",
+    help="Path to the config folder. If it does not exist, it will be created.",
+    show_default="'config' directory in the environment directory",
+    metavar="PATH",
+    type=click.Path(file_okay=False),
+)
 @required_environment
 @verbose_mode
 @debug_mode
@@ -239,6 +253,8 @@ def create(
     verbose: bool,
     debug: bool,
     dags_path: Optional[pathlib.Path] = None,
+    layers_path: Optional[pathlib.Path] = None,
+    config_path: Optional[pathlib.Path] = None,
 ):
     """
     Create local Composer development environment.
@@ -292,6 +308,8 @@ def create(
             env_dir_path=env_dir,
             web_server_port=web_server_port,
             dags_path=dags_path,
+            layers_path=layers_path,
+            config_path=config_path,
         )
     else:
         env = composer_environment.Environment(
@@ -301,6 +319,8 @@ def create(
             env_dir_path=env_dir,
             port=web_server_port,
             dags_path=dags_path,
+            layers_path=layers_path,
+            config_path=config_path,
         )
     env.create()
 

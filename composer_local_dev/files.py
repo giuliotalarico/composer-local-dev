@@ -107,6 +107,44 @@ def resolve_dags_path(dags_path: Optional[str], env_dir: pathlib.Path) -> str:
     return str(dags_path.resolve())
 
 
+def resolve_layers_path(layers_path: Optional[str], env_dir: pathlib.Path) -> str:
+    """
+    Provides and validates path to the sql layer directory.
+    If ``layers_path`` is None, the path is constructed from ``env_dir`` path and
+    ``layers`` directory.
+    If ``layers_path`` is not None, but it does not exist, a warning is raised.
+
+    Returns absolute ``layers_path` path.
+    """
+    if layers_path is None:
+        console.get_console().print(constants.DAGS_PATH_NOT_PROVIDED_WARN)
+        layers_path = env_dir / "layers"
+    else:
+        if isinstance(layers_path, tuple):
+            layers_path = layers_path[0]
+        layers_path = pathlib.Path(layers_path)
+    return str(layers_path.resolve())
+
+
+def resolve_config_path(config_path: Optional[str], env_dir: pathlib.Path) -> str:
+    """
+    Provides and validates path to the config directory.
+    If ``config_path`` is None, the path is constructed from ``env_dir`` path and
+    ``config`` directory.
+    If ``config_path`` is not None, but it does not exist, a warning is raised.
+
+    Returns absolute ``config_path` path.
+    """
+    if config_path is None:
+        console.get_console().print(constants.DAGS_PATH_NOT_PROVIDED_WARN)
+        config_path = env_dir / "config"
+    else:
+        if isinstance(config_path, tuple):
+            config_path = config_path[0]
+        config_path = pathlib.Path(config_path)
+    return str(config_path.resolve())
+
+
 def create_environment_directories(env_dir: pathlib.Path, dags_path: str):
     """
     Create environment directories (overwriting existing ones).
@@ -146,7 +184,6 @@ def get_available_environments(composer_dir: pathlib.Path):
 
 def fix_file_permissions(
     entrypoint: pathlib.Path,
-    requirements: pathlib.Path,
     airflow_db: pathlib.Path,
 ) -> None:
     """
@@ -154,15 +191,12 @@ def fix_file_permissions(
     Linux OS. Windows and MAC OS X don't need it.
     Args:
         entrypoint: Init script of the container. It needs to be executable.
-        requirements: List of PyPi packages to be installed in the container.
-        It needs to be readable by all users.
         airflow_db: path to Airflow Sqlite database file.
         It needs to be writeable.
     """
     if not utils.is_linux_os():
         return
     make_file_readable_and_executable(entrypoint)
-    make_file_writeable(requirements)
     make_file_writeable(airflow_db)
 
 
@@ -175,14 +209,13 @@ def make_file_writeable(file_path: pathlib.Path) -> None:
 
 
 def fix_line_endings(
-    entrypoint: pathlib.Path, requirements: pathlib.Path
+    entrypoint: pathlib.Path
 ) -> None:
     """
     Fix windows line endings so the files created under Windows
     can be used in the docker container.
     """
     dos2unix_file(entrypoint)
-    dos2unix_file(requirements)
 
 
 def dos2unix_file(path: pathlib.Path):
@@ -196,6 +229,7 @@ def dos2unix_file(path: pathlib.Path):
 
 def create_empty_file(path: pathlib.Path, skip_if_exist: bool = True):
     """Create an empty file."""
+    path.parent.mkdir(parents=True, exist_ok=True)  # Create parent directories if they don't exist
     if skip_if_exist and path.exists():
         return
     with open(path, "w"):
